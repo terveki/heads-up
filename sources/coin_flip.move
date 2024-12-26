@@ -11,7 +11,6 @@ module overmind::coin_flip {
     //==============================================================================================
     // Dependencies
     //==============================================================================================
-
     use std::signer;
     use std::vector;
     use aptos_framework::coin;
@@ -190,7 +189,7 @@ module overmind::coin_flip {
         // TODO: Ensure that the prize has not be claimed yet
         //
         // HINT: Use the `check_if_prize_is_not_claimed_yet` function
-        let state = borrow_global_mut<State>(signer::address_of(player));
+        let state = borrow_global_mut<State>(get_resource_account_address());
         check_if_prize_is_not_claimed_yet(state);
         // TODO: Ensure the `flips` are valid
         //
@@ -207,7 +206,7 @@ module overmind::coin_flip {
             // Flips predicted by the player
             predicted_flips: flips,
             // Actual flips, that are provided by module admin
-            flips_result: option::some(vector::empty<u8>())
+            flips_result: option::none()
         };
         simple_map::add(&mut state.games, next_game_id, new_game);
         // TODO: Emit GuessFlipsEvent event
@@ -219,7 +218,7 @@ module overmind::coin_flip {
             // Timestamp when the event was created
             event_creation_timestamp_in_seconds: timestamp::now_microseconds()
         };
-        event::emit<GuessFlipsEvent>(guess_flip_event);
+        event::emit_event<GuessFlipsEvent>(&mut state.guess_flips_events, guess_flip_event);
     }
 
     /*
@@ -243,7 +242,7 @@ module overmind::coin_flip {
         // TODO: Ensure the prize has not been claimed yet
         //
         // HINT: Use the `check_if_prize_is_not_claimed_yet` function
-        let state = borrow_global_mut<State>(signer::address_of(admin));
+        let state = borrow_global_mut<State>(get_resource_account_address());
         check_if_prize_is_not_claimed_yet(state);
 
         // TODO: Ensure the game with the provided ID exists
@@ -272,7 +271,7 @@ module overmind::coin_flip {
             // Timestamp when the event was created
             event_creation_timestamp_in_seconds:timestamp::now_microseconds()
         };
-        event::emit<ProvideFlipsResultEvent>(flips_result_event);
+        event::emit_event<ProvideFlipsResultEvent>(&mut state.provide_flips_result_events, flips_result_event);
         // TODO: Check if `flips_result` matches the Game's `predicted_flips`
         // flis_result is what admin decides
         // the_game.predicted_flips is what user guesses
@@ -280,10 +279,12 @@ module overmind::coin_flip {
         let result = true;
         while(counter < NUMBER_OF_FLIPS) {
             if(*vector::borrow(&flips_result, counter) == *vector::borrow(&the_game.predicted_flips, counter)) {
+                counter = counter + 1;
                 continue
             }
             else {
-                result = false
+                result = false;
+                break
             }
         };
         if (result) {
@@ -291,7 +292,7 @@ module overmind::coin_flip {
         //      1) Transfer `PRIZE_AMOUNT_APT` amount of APT from the resource account to the player 
         //          of the game
         //let resource_acc_address = account::get_signer_capability_address(&state.cap);
-            coin::transfer<AptosCoin>(admin, the_game.player_address, PRIZE_AMOUNT_APT);
+            coin::transfer<AptosCoin>(&account::create_signer_with_capability(&state.cap), the_game.player_address, PRIZE_AMOUNT_APT);
             //      2) Change State's `prize_claimed` to true
             state.prize_claimed = true;
             //      3) Emit ClaimPrizeEvent event
@@ -303,7 +304,7 @@ module overmind::coin_flip {
                 // Timestamp when the event was created
                 event_creation_timestamp_in_seconds: timestamp::now_microseconds()
             };
-            event::emit<ClaimPrizeEvent>(claim_prize_event);
+            event::emit_event<ClaimPrizeEvent>(&mut state.claim_prize_events, claim_prize_event);
         }
     }
 
@@ -314,7 +315,7 @@ module overmind::coin_flip {
    #[view]
     public fun get_all_games(): SimpleMap<u128, Game> acquires State {
         // TODO: Return State's `games` field
-        let state = borrow_global<State>(@0x1337);
+        let state = borrow_global<State>(get_resource_account_address());
         return state.games
     }
 
@@ -329,7 +330,7 @@ module overmind::coin_flip {
         // TODO: Ensure the game with the provided ID exists
         //
         // HINT: Use the `check_if_game_exists` function
-        let state = borrow_global<State>(@0x1337);
+        let state = borrow_global<State>(get_resource_account_address());
         check_if_game_exists(&state.games, &game_id);
 
         // TODO: Ensure the admin has already submitted the flip results for the game
@@ -344,10 +345,12 @@ module overmind::coin_flip {
         while(counter < NUMBER_OF_FLIPS) {
             if(*vector::borrow(option::borrow<vector<u8>>(&the_game.flips_result), counter) == 
                     *vector::borrow(&the_game.predicted_flips, counter)) {
+                counter = counter + 1;
                 continue
             }
             else {
-                result = false
+                result = false;
+                break
             }
         };
         return result
@@ -364,7 +367,7 @@ module overmind::coin_flip {
     inline fun get_resource_account_address(): address {
         // TODO: Get the return the address of the resource account created in `init_module` 
         //          function
-        @admin
+        account::create_resource_address(&@overmind, SEED)
     }
 
     /*
@@ -424,6 +427,7 @@ module overmind::coin_flip {
         while(i < NUMBER_OF_FLIPS) {
             let item = vector::borrow<u8>(flips, i);
             assert!(*item == HEAD || *item == TAIL, EInvalidFlipValue);
+            i = i + 1;
         }
 
     }
@@ -437,7 +441,7 @@ module overmind::coin_flip {
     inline fun check_if_overmind_has_already_submitted_the_flips(game: &Game) {
         // TODO: Ensure the Game's `flips_result` field is some. If not, abort with code:
         //          `EOvermindHasNotSubmittedTheFlipsYet`.
-        assert!(option::is_some<vector<u8>>(&game.flips_result), EOvermindHasAlreadySubmittedTheFlips);
+        assert!(option::is_some<vector<u8>>(&game.flips_result), EOvermindHasNotSubmittedTheFlipsYet);
     }
 
     //==============================================================================================
